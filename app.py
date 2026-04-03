@@ -1,93 +1,98 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-import pickle
-import os
-from datetime import datetime
+from fastapi import FastAPI, UploadFile, File
+from groq import Groq
+from sentence_transformers import SentenceTransformer
+import faiss
 import numpy as np
+import pypdf
+import docx
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI()
 
-# Paths
-MODEL_DIR = "models"
-MODEL_PATH = os.path.join(MODEL_DIR, "model.pkl")
-VECTORIZER_PATH = os.path.join(MODEL_DIR, "vectorizer.pkl")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# Load model
-try:
-    model = pickle.load(open(MODEL_PATH, "rb"))
-    vectorizer = pickle.load(open(VECTORIZER_PATH, "rb"))
-except:
-    model = None
-    vectorizer = None
+# Initialize models
+embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+client = Groq(api_key=GROQ_API_KEY)
 
-# Request schema
-class TextInput(BaseModel):
-    text: str
+# Storage
+DOCUMENTS = []
+DOC_EMBEDDINGS = None
+INDEX = None
 
-class BatchInput(BaseModel):
-    texts: list[str]
 
-# ------------------- ROUTES -------------------
+# Extract PDF
+def extract_pdf(file):
+    reader = pypdf.PdfReader(file)
+    text = ""
+    for page in reader.pages:
+        text += page.extract_text()
+    return text
 
-@app.get("/")
-def home():
-    return {"message": "ML API is running"}
 
-@app.get("/health")
-def health():
+# Extract DOCX
+def extract_docx(file):
+    doc = docx.Document(file)
+    return "\n".join([para.text for para in doc.paragraphs])
+
+
+# Upload
+@app.post("/upload")
+async def upload_document(file: UploadFile = File(...)):
+    global DOCUMENTS, DOC_EMBEDDINGS, INDEX
+
+    if file.filename.endswith(".pdf"):
+        text = extract_pdf(file.file)
+    elif file.filename.endswith(".docx"):
+        text = extract_docx(file.file)
+    else:
+        return {"error": "Unsupported file type"}
+
+    # Chunk
+    chunks = [text[i:i+500] for i in range(0, len(text), 500)]
+    DOCUMENTS.extend(chunks)
+
+    # Embeddings
+    embeddings = embedding_model.encode(chunks)
+
+    if DOC_EMBEDDINGS is None:
+        DOC_EMBEDDINGS = embeddings
+    else:
+        DOC_EMBEDDINGS = np.vstack((DOC_EMBEDDINGS, embeddings))
+
+    # FAISS
+    dimension = embeddings.shape[1]
+    INDEX = faiss.IndexFlatL2(dimension)
+    INDEX.add(DOC_EMBEDDINGS)
+
+    return {"message": "File processed", "chunks": len(chunks)}
+
+
+# Query
+@app.post("/query")
+def ask(query: str):
+    global DOCUMENTS, INDEX
+
+    if INDEX is None:
+        return {"error": "No documents uploaded"}
+
+    query_embedding = embedding_model.encode([query])
+    distances, indices = INDEX.search(query_embedding, 3)
+
+    context = "\n".join([DOCUMENTS[i] for i in indices[0]])
+
+    response = client.chat.completions.create(
+        model="llama3-70b-8192",
+        messages=[
+            {"role": "system", "content": "Answer only from given context."},
+            {"role": "user", "content": f"Context:\n{context}\n\nQuestion:{query}"}
+        ]
+    )
+
     return {
-        "status": "healthy",
-        "model_loaded": model is not None,
-        "timestamp": datetime.utcnow().isoformat()
-    }
-
-@app.post("/predict")
-def predict(data: TextInput):
-    if model is None or vectorizer is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
-
-    text = data.text.strip()
-
-    if len(text) < 3:
-        raise HTTPException(status_code=400, detail="Text too short")
-
-    if len(text) > 10000:
-        raise HTTPException(status_code=400, detail="Text too long")
-
-    vec = vectorizer.transform([text])
-    pred = model.predict(vec)[0]
-    probs = model.predict_proba(vec)[0]
-
-    return {
-        "input": text,
-        "prediction": int(pred),
-        "confidence": float(max(probs)),
-        "timestamp": datetime.utcnow().isoformat()
-    }
-
-@app.post("/predict/batch")
-def predict_batch(data: BatchInput):
-    if model is None or vectorizer is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
-
-    if len(data.texts) > 100:
-        raise HTTPException(status_code=400, detail="Max 100 texts allowed")
-
-    vecs = vectorizer.transform(data.texts)
-    preds = model.predict(vecs)
-    probs = model.predict_proba(vecs)
-
-    results = []
-
-    for i, (p, pr) in enumerate(zip(preds, probs)):
-        results.append({
-            "index": i,
-            "text": data.texts[i],
-            "prediction": int(p),
-            "confidence": float(max(pr))
-        })
-
-    return {
-        "results": results,
-        "batch_size": len(results)
+        "answer": response.choices[0].message.content,
+        "context_used": context
     }
