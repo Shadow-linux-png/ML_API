@@ -1,0 +1,42 @@
+{
+  "version": "2.0.0",
+  "model_type": "MultinomialNB",
+  "feature_extraction": "TF-IDF",
+  "trained_at": "2026-04-03T06:25:45.090097",
+  "test_accuracy": 0.965,
+  "cv_accuracy_mean": 0.89625,
+  "cv_accuracy_std": 0.03635759893062248,
+  "best_params": {
+    "classifier__alpha": 0.1,
+    "vectorizer__max_features": 1000,
+    "vectorizer__ngram_range": [
+      1,
+      1
+    ]
+  },
+  "classes": [
+    "Negative",
+    "Positive",
+    "Neutral"
+  ],
+  "feature_count": 931,
+  "training_samples": 800,
+  "test_samples": 200,
+  "confusion_matrix": [
+    [
+      77,
+      2,
+      1
+    ],
+    [
+      2,
+      78,
+      0
+    ],
+    [
+      1,
+      1,
+      38
+    ]
+  ]
+}
