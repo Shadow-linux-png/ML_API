@@ -1,9 +1,10 @@
 fastapi
 uvicorn
-arcee
+groq
 sentence-transformers
 faiss-cpu
 numpy
 pypdf
 python-docx
 python-dotenv
+python-multipart
