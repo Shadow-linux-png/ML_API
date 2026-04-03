@@ -99,10 +99,47 @@ def validate_text_input(text: str) -> Optional[str]:
 # Load model on startup
 load_model()
 
-@app.route('/predict', methods=['POST'])
+@app.route('/predict', methods=['POST', 'GET'])
 @limiter.limit("10 per minute")
 def predict():
     """Predict sentiment for input text with comprehensive error handling."""
+    
+    # Handle GET requests for browser testing
+    if request.method == 'GET':
+        return '''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Sentiment Analysis API</title>
+            <meta charset="UTF-8">
+            <style>
+                body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+                .form { background: #f5f5f5; padding: 20px; border-radius: 5px; }
+                textarea { width: 100%; height: 100px; padding: 10px; margin: 10px 0; }
+                button { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
+                .result { background: #e9ecef; padding: 15px; margin: 10px 0; border-radius: 5px; }
+            </style>
+        </head>
+        <body>
+            <h1>Sentiment Analysis API</h1>
+            <div class="form">
+                <h3>Test API</h3>
+                <form method="POST" action="/predict">
+                    <textarea name="text" placeholder="Enter text to analyze..."></textarea><br>
+                    <button type="submit">Analyze Sentiment</button>
+                </form>
+                <p><strong>Note:</strong> For programmatic access, use POST requests with JSON data.</p>
+                <h3>API Endpoints:</h3>
+                <ul>
+                    <li><strong>POST /predict</strong> - Single text analysis</li>
+                    <li><strong>POST /predict/batch</strong> - Batch text analysis</li>
+                    <li><strong>GET /health</strong> - Health check</li>
+                </ul>
+            </div>
+        </body>
+        </html>
+        '''
+    
     if model is None or vectorizer is None:
         logger.warning("Prediction attempted with no model loaded")
         return jsonify({
