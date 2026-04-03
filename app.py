@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File
-from groq import Groq
+from arcee import arcee
 from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
@@ -12,11 +12,26 @@ load_dotenv()
 
 app = FastAPI()
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+ARCEE_API_KEY = os.getenv("ARCEE_API_KEY")
 
 # Initialize models
 embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
-client = Groq(api_key=GROQ_API_KEY)
+
+# Only initialize Arcee if API key is valid
+try:
+    # Test the connection
+    test_response = arcee(
+        model="trinity-large-thinking",
+        prompt="hi",
+        api_key=ARCEE_API_KEY,
+        max_tokens=1
+    )
+    print(" Arcee AI connection successful")
+    ARCEE_CLIENT = True
+except Exception as e:
+    print(f" Arcee AI Error: {e}")
+    print(" Running in demo mode without LLM")
+    ARCEE_CLIENT = False
 
 # Storage
 DOCUMENTS = []
@@ -73,7 +88,7 @@ async def upload_document(file: UploadFile = File(...)):
 
 # Query
 @app.post("/query")
-def ask(query: str):
+async def ask(query: str):
     global DOCUMENTS, INDEX
 
     if INDEX is None:
@@ -82,17 +97,31 @@ def ask(query: str):
     query_embedding = embedding_model.encode([query])
     distances, indices = INDEX.search(query_embedding, 3)
 
-    context = "\n".join([DOCUMENTS[i] for i in indices[0]])
+    context = "\n".join([DOCUMENTS[i] for i in indices[0] if i < len(DOCUMENTS)])
 
-    response = client.chat.completions.create(
-        model="llama3-70b-8192",
-        messages=[
-            {"role": "system", "content": "Answer only from given context."},
-            {"role": "user", "content": f"Context:\n{context}\n\nQuestion:{query}"}
-        ]
-    )
+    if not context.strip():
+        return {"error": "No relevant context found"}
+
+    # Check if Arcee client is available
+    if not ARCEE_CLIENT:
+        return {
+            "answer": f"Demo mode: Based on context, here's what I found:\n\n{context[:500]}...",
+            "context_used": context,
+            "demo_mode": True
+        }
+
+    # Generate response with Arcee AI
+    try:
+        response = arcee(
+            model="trinity-large-thinking",
+            prompt=f"Context:\n{context}\n\nQuestion: {query}\n\nAnswer only from the given context:",
+            api_key=ARCEE_API_KEY,
+            max_tokens=1000
+        )
+    except Exception as e:
+        return {"error": f"Arcee AI error: {str(e)}", "context_used": context}
 
     return {
-        "answer": response.choices[0].message.content,
+        "answer": response,
         "context_used": context
     }
