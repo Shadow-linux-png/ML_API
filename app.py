@@ -1,5 +1,4 @@
 from fastapi import FastAPI, UploadFile, File
-from arcee import arcee
 from sentence_transformers import SentenceTransformer
 import faiss
 import numpy as np
